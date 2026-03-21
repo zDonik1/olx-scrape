@@ -1,0 +1,7 @@
+# Virtual environments
+.devenv*
+
+# Output
+saved_html/
+output.xlsx
+.~lock*
