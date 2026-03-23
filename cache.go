@@ -13,7 +13,7 @@ const (
 	saveAdsDir   = "ads"
 )
 
-func initCache() {
+func InitCache() {
 	if cfg.RefreshCache {
 		if err := os.RemoveAll(cfg.CacheDir); err != nil {
 			slog.Error("could not remove cache", "path", cfg.CacheDir, "error", err)
@@ -37,32 +37,36 @@ func initCache() {
 	}
 }
 
-func loadAiCache() map[uint]AdData {
-	aiCache := map[uint]AdData{}
-	data, err := os.ReadFile(getAiCachePath())
-	if err == nil {
-		slog.Info("using AI cache")
-	} else if !os.IsNotExist(err) {
-		slog.Error("failed to open file", "path", getAiCachePath(), "error", err)
-		os.Exit(1)
-	} else {
-		return aiCache
-	}
+type Cache map[string]AdData
 
-	if err := json.Unmarshal(data, &aiCache); err != nil {
-		slog.Error("failed to unmarshal AI cache into json", "error", err)
-		os.Exit(1)
-	}
-	return aiCache
+func NewCache() Cache {
+	return map[string]AdData{}
 }
 
-func saveAiCache(cache map[uint]AdData) error {
-	data, err := json.Marshal(cache)
-	if err != nil {
-		return fmt.Errorf("failed to marshal to json: %w\n%v", err, cache)
+func (c *Cache) Load() {
+	data, err := os.ReadFile(getCachePath())
+	if err == nil {
+		slog.Debug("cache found", "path", getCachePath())
+	} else if !os.IsNotExist(err) {
+		slog.Error("failed to open file", "path", getCachePath(), "error", err)
+		os.Exit(1)
+	} else {
+		return
 	}
 
-	tempFile, err := os.CreateTemp("", "ai_cache_*.json")
+	if err := json.Unmarshal(data, c); err != nil {
+		slog.Error("failed to unmarshal cache into json", "error", err)
+		os.Exit(1)
+	}
+}
+
+func (c Cache) Save() error {
+	data, err := json.Marshal(c)
+	if err != nil {
+		return fmt.Errorf("failed to marshal to json: %w\n%v", err, map[string]AdData(c))
+	}
+
+	tempFile, err := os.CreateTemp("", "cache_*.json")
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
@@ -73,7 +77,7 @@ func saveAiCache(cache map[uint]AdData) error {
 	}
 	tempFile.Close()
 
-	return os.Rename(tempFile.Name(), getAiCachePath())
+	return os.Rename(tempFile.Name(), getCachePath())
 }
 
 func getPagesDir() string {
@@ -84,6 +88,6 @@ func getAdsDir() string {
 	return path.Join(cfg.CacheDir, saveAdsDir)
 }
 
-func getAiCachePath() string {
-	return path.Join(cfg.CacheDir, "ai_cache.json")
+func getCachePath() string {
+	return path.Join(cfg.CacheDir, "cache.json")
 }

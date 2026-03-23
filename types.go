@@ -20,20 +20,23 @@ const (
 )
 
 type AdData struct {
-	Id             uint                    `json:"id"`
-	Date           Date                    `json:"date"`
-	Price          float32                 `json:"price"`
-	Condition      Condition               `json:"condition"`
-	Name           string                  `json:"name"`
-	Desc           string                  `json:"desc"`
-	Url            string                  `json:"url"`
-	StructuredData OrderedMap[string, any] `json:"data"`
+	Id             uint                     `json:"id"`
+	Date           Date                     `json:"date"`
+	Price          float32                  `json:"price"`
+	Condition      Condition                `json:"condition"`
+	Name           string                   `json:"name"`
+	Desc           string                   `json:"desc"`
+	Url            string                   `json:"url"`
+	StructuredData *OrderedMap[string, any] `json:"data"`
 }
 
 func (ad AdData) CsvHeaders() []string {
+	structDataKeys := []string{}
+	if ad.StructuredData != nil {
+		structDataKeys = ad.StructuredData.Keys()
+	}
 	return slices.Concat(
-		[]string{"id", "date", "price", "condition", "name", "desc", "url"},
-		ad.StructuredData.Keys(),
+		[]string{"id", "date", "price", "condition", "name", "desc", "url"}, structDataKeys,
 	)
 }
 
@@ -48,8 +51,10 @@ func (ad AdData) CsvRow() []string {
 		ad.Url,
 	}
 
-	for _, v := range ad.StructuredData.All() {
-		result = append(result, stringify(v))
+	if ad.StructuredData != nil {
+		for _, v := range ad.StructuredData.All() {
+			result = append(result, stringify(v))
+		}
 	}
 	return result
 }
@@ -73,8 +78,8 @@ type OrderedMap[K comparable, V any] struct {
 	order []K
 }
 
-func NewOrderedMap[K comparable, V any]() OrderedMap[K, V] {
-	return OrderedMap[K, V]{
+func NewOrderedMap[K comparable, V any]() *OrderedMap[K, V] {
+	return &OrderedMap[K, V]{
 		m:     make(map[K]V),
 		order: make([]K, 0),
 	}

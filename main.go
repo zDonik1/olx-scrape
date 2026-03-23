@@ -33,20 +33,23 @@ var (
 func main() {
 	initConfig()
 	initLogger()
-	initCache()
+	InitCache()
 
 	urls := make(chan string)
 	adUrls := make(chan string)
 	adDatas := make(chan AdData)
 	procAdDatas := make(chan AdData)
 
+	cache := NewCache()
+	cache.Load()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	// It is always best to keep this at 1 worker, so that pages are processed sequentially
 	processPages(ctx, urls, adUrls, cancel, 1)
-	processAds(adUrls, adDatas, int(cfg.Jobs))
+	processAds(adUrls, adDatas, cache, int(cfg.Jobs))
 	// AI processing is done with Ollama and as such always ends up being the bottleneck.
 	// Thus it is best to keep it at 1 worker
-	processAiData(adDatas, procAdDatas, 1)
+	processAiData(adDatas, procAdDatas, cache, 1)
 
 	go func() {
 		defer close(urls)
@@ -120,16 +123,12 @@ func processPages(
 	)
 }
 
-func processAds(
-	urls <-chan string,
-	out chan<- AdData,
-	workers int,
-) {
+func processAds(urls <-chan string, out chan<- AdData, cache Cache, workers int) {
 	runWithWorkers(
 		workers,
 		func() {
 			for url := range urls {
-				getAdData(out, url)
+				getAdData(out, url, cache)
 			}
 		},
 		func() {
@@ -138,11 +137,7 @@ func processAds(
 	)
 }
 
-func processAiData(
-	adDatas <-chan AdData,
-	out chan<- AdData,
-	workers int,
-) {
+func processAiData(adDatas <-chan AdData, out chan<- AdData, cache Cache, workers int) {
 	if !cfg.AiProcessing {
 		go func() {
 			for adData := range adDatas {
@@ -153,13 +148,11 @@ func processAiData(
 		return
 	}
 
-	aiCache := loadAiCache()
-
 	runWithWorkers(
 		workers,
 		func() {
 			for adData := range adDatas {
-				getAiProcessedData(out, adData, aiCache)
+				getAiProcessedData(out, adData, cache)
 			}
 		},
 		func() {
@@ -224,7 +217,13 @@ func getAdUrls(out chan<- string, cancel context.CancelFunc, url string) {
 	})
 }
 
-func getAdData(out chan<- AdData, url string) {
+func getAdData(out chan<- AdData, url string, cache Cache) {
+	if adData, exists := cache[url]; exists {
+		adData.StructuredData = nil
+		out <- adData
+		return
+	}
+
 	contentReader, err := fetch(url)
 	if err != nil {
 		slog.Error("could not fetch", "url", url, "error", err)
@@ -238,7 +237,7 @@ func getAdData(out chan<- AdData, url string) {
 		return
 	}
 
-	out <- AdData{
+	adData := AdData{
 		Id:        getId(doc),
 		Date:      getDate(doc),
 		Price:     getPrice(doc),
@@ -247,13 +246,19 @@ func getAdData(out chan<- AdData, url string) {
 		Desc:      getDesc(doc),
 		Url:       url,
 	}
+
+	cache[url] = adData
+	if err := cache.Save(); err != nil {
+		slog.Error("failed to save cache", "error", err)
+		return
+	}
+
+	out <- adData
 }
 
-func getAiProcessedData(
-	out chan<- AdData, adData AdData, aiCache map[uint]AdData,
-) {
-	if procAdData, exists := aiCache[adData.Id]; exists {
-		out <- procAdData
+func getAiProcessedData(out chan<- AdData, adData AdData, cache Cache) {
+	if adData, exists := cache[adData.Url]; exists && adData.StructuredData != nil {
+		out <- adData
 		return
 	}
 
@@ -279,22 +284,22 @@ func getAiProcessedData(
 		result = strings.TrimSuffix(result, "```")
 		result = strings.TrimSpace(result)
 
-		adData.StructuredData = OrderedMap[string, any]{}
-		if err := json.Unmarshal([]byte(result), &adData.StructuredData); err != nil {
+		adData.StructuredData = NewOrderedMap[string, any]()
+		if err := json.Unmarshal([]byte(result), adData.StructuredData); err != nil {
 			return fmt.Errorf("failed to unmarshal to json: %w\n%s", err, resp.Message.Content)
 		}
 
-		aiCache[adData.Id] = adData
-		if err := saveAiCache(aiCache); err != nil {
-			return fmt.Errorf("failed to save AI cache: %w", err)
+		cache[adData.Url] = adData
+		if err := cache.Save(); err != nil {
+			return fmt.Errorf("failed to save cache: %w", err)
 		}
-		out <- adData
 		return nil
 	})
 	if err != nil {
 		slog.Error("failed to get ollama response", "error", err)
 		return
 	}
+	out <- adData
 }
 
 func fetch(url string) (io.ReadCloser, error) {
