@@ -20,9 +20,9 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/gocarina/gocsv"
 	"github.com/lmittmann/tint"
 	"github.com/ollama/ollama/api"
-	"github.com/xuri/excelize/v2"
 )
 
 var (
@@ -63,7 +63,7 @@ func main() {
 		}
 	}()
 
-	writeToExcel(procAdDatas)
+	writeOutput(procAdDatas)
 
 	fmt.Printf(`
 Summary:
@@ -171,108 +171,23 @@ func processAiData(
 	}()
 }
 
-func writeToExcel(datas <-chan ProcessedAdData) {
-	f := excelize.NewFile()
-	defer func() {
-		if err := f.Close(); err != nil {
-			slog.Error("couldn't close excel file", "error", err)
-		}
-	}()
-
-	defaultSheet := "Sheet1"
-	headers := []string{
-		"id", "date", "price", "condition", "name", "description", "url", "cpu", "gpu", "ram",
-		"storage", "motherboard", "cpu_cooler", "case", "psu", "os",
-	}
-	for i, h := range headers {
-		cell, err := excelize.CoordinatesToCellName(i+1, 1)
-		if err != nil {
-			slog.Error("failed to calculate cell name", "x", i+1, "y", 1)
-			os.Exit(1)
-		}
-		f.SetCellValue(defaultSheet, cell, h)
-	}
-
-	try := func(err error, f func() error) error {
-		if err != nil {
-			return err
-		}
-		return f()
-	}
-
-	rowCounter := 2 // Skip heading line
-	for data := range datas {
-		err := try(nil, func() error {
-			return f.SetCellValue(defaultSheet, fmt.Sprintf("A%d", rowCounter), data.Id)
-		})
-		err = try(err, func() error {
-			return f.SetCellValue(defaultSheet, fmt.Sprintf("B%d", rowCounter), data.Date)
-		})
-		err = try(err, func() error {
-			return f.SetCellValue(defaultSheet, fmt.Sprintf("C%d", rowCounter), data.Price)
-		})
-		err = try(err, func() error {
-			return f.SetCellValue(defaultSheet, fmt.Sprintf("D%d", rowCounter), data.Condition)
-		})
-		err = try(err, func() error {
-			return f.SetCellValue(defaultSheet, fmt.Sprintf("E%d", rowCounter), data.Name)
-		})
-		err = try(err, func() error {
-			return f.SetCellValue(defaultSheet, fmt.Sprintf("F%d", rowCounter), data.Desc)
-		})
-		err = try(err, func() error {
-			return f.SetCellValue(defaultSheet, fmt.Sprintf("G%d", rowCounter), data.Url)
-		})
-		err = try(err, func() error {
-			return f.SetCellValue(defaultSheet, fmt.Sprintf("H%d", rowCounter), val(data.Cpu))
-		})
-		err = try(err, func() error {
-			return f.SetCellValue(defaultSheet, fmt.Sprintf("I%d", rowCounter), val(data.Gpu))
-		})
-		err = try(err, func() error {
-			return f.SetCellValue(defaultSheet, fmt.Sprintf("J%d", rowCounter), val(data.Ram))
-		})
-		err = try(err, func() error {
-			return f.SetCellValue(
-				defaultSheet,
-				fmt.Sprintf("K%d", rowCounter),
-				strings.Join(data.Storage, "\n"),
-			)
-		})
-		err = try(err, func() error {
-			return f.SetCellValue(defaultSheet, fmt.Sprintf("L%d", rowCounter), val(data.Motherboard))
-		})
-		err = try(err, func() error {
-			return f.SetCellValue(defaultSheet, fmt.Sprintf("M%d", rowCounter), val(data.Cooler))
-		})
-		err = try(err, func() error {
-			return f.SetCellValue(defaultSheet, fmt.Sprintf("N%d", rowCounter), val(data.Psu))
-		})
-		err = try(err, func() error {
-			return f.SetCellValue(defaultSheet, fmt.Sprintf("O%d", rowCounter), val(data.Os))
-		})
-		if err != nil {
-			slog.Error("failed to set cell value", "error", err)
-			os.Exit(1)
-		}
-		rowCounter++
-
-	}
-
-	// price $ style
-	style, err := f.NewStyle(&excelize.Style{NumFmt: 165})
+func writeOutput(datas <-chan ProcessedAdData) {
+	outputPath := "output.csv"
+	f, err := os.OpenFile(outputPath, os.O_RDWR|os.O_CREATE, 0o644)
 	if err != nil {
-		slog.Error("failed to create style", "error", err)
+		slog.Error("failed to open file", "path", outputPath, "error", err)
 		os.Exit(1)
 	}
-	if err = f.SetColStyle(defaultSheet, "C", style); err != nil {
-		slog.Error("failed to set style", "col", "C", "error", err)
-		os.Exit(1)
+	defer f.Close()
+
+	collector := []ProcessedAdData{}
+	for data := range datas {
+		slog.Debug("saving ad data", "data", data)
+		collector = append(collector, data)
 	}
 
-	fileName := "output.xlsx"
-	if err := f.SaveAs(fileName); err != nil {
-		slog.Error("failed to save excel file", "name", fileName, "error", err)
+	if err := gocsv.Marshal(collector, f); err != nil {
+		slog.Error("failed to marshal to CSV", "error", err)
 		os.Exit(1)
 	}
 }
@@ -317,13 +232,13 @@ const (
 )
 
 type AdData struct {
-	Id        uint      `json:"-"`
-	Date      time.Time `json:"-"`
-	Price     float32   `json:"-"`
-	Condition Condition `json:"-"`
-	Name      string    `json:"-"`
-	Desc      string    `json:"-"`
-	Url       string    `json:"-"`
+	Id        uint      `json:"id" csv:"id"`
+	Date      Date      `json:"date" csv:"date"`
+	Price     float32   `json:"price" csv:"price"`
+	Condition Condition `json:"condition" csv:"condition"`
+	Name      string    `json:"name" csv:"name"`
+	Desc      string    `json:"desc" csv:"desc"`
+	Url       string    `json:"url" csv:"url"`
 }
 
 func getAdData(out chan<- AdData, url string) {
@@ -353,15 +268,15 @@ func getAdData(out chan<- AdData, url string) {
 
 type ProcessedAdData struct {
 	AdData
-	Cpu         *string  `json:"cpu"`
-	Gpu         *string  `json:"gpu"`
-	Ram         *string  `json:"ram"`
-	Storage     []string `json:"storage"`
-	Motherboard *string  `json:"motherboard"`
-	Cooler      *string  `json:"cpu_cooler"`
-	Case        *string  `json:"case"`
-	Psu         *string  `json:"psu"`
-	Os          *string  `json:"os"`
+	Cpu         *string  `json:"cpu" csv:"cpu"`
+	Gpu         *string  `json:"gpu" csv:"gpu"`
+	Ram         *string  `json:"ram" csv:"ram"`
+	Storage     []string `json:"storage" csv:"storage"`
+	Motherboard *string  `json:"motherboard" csv:"motherboard"`
+	Cooler      *string  `json:"cpu_cooler" csv:"cpu_cooler"`
+	Case        *string  `json:"case" csv:"case"`
+	Psu         *string  `json:"psu" csv:"psu"`
+	Os          *string  `json:"os" csv:"os"`
 }
 
 func getAiProcessedData(
@@ -484,13 +399,12 @@ func getId(doc *goquery.Document) uint {
 	return id
 }
 
-func getDate(doc *goquery.Document) time.Time {
-	var date time.Time
+func getDate(doc *goquery.Document) Date {
+	var date Date
 	text := doc.Find(`span[data-cy="ad-posted-at"]`).Text()
 	dateStr := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(text)), "опубликовано ")
 	if strings.HasPrefix(dateStr, "сегодня") {
-		t := time.Now()
-		date = time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+		date = Date{Time: time.Now()}
 	} else {
 		parsedDate, err := parseRussianDate(dateStr)
 		if err != nil {
@@ -571,23 +485,16 @@ var russianMonths = map[string]string{
 	"декабря":  "December",
 }
 
-func parseRussianDate(s string) (time.Time, error) {
+func parseRussianDate(s string) (Date, error) {
 	for ru, en := range russianMonths {
 		s = strings.TrimSuffix(strings.ReplaceAll(s, ru, en), " г.")
 	}
-	return time.Parse("2 January 2006", s)
+	dateTime, err := time.Parse("2 January 2006", s)
+	return Date{Time: dateTime}, err
 }
 
 func ptr[T any](val T) *T {
 	return &val
-}
-
-func val[T any](ptr *T) T {
-	if ptr == nil {
-		var zero T
-		return zero
-	}
-	return *ptr
 }
 
 const systemPrompt = `
