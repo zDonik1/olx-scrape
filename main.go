@@ -170,7 +170,7 @@ func processAiData(
 
 func writeOutput(datas <-chan ProcessedAdData) {
 	outputPath := "output.csv"
-	f, err := os.OpenFile(outputPath, os.O_RDWR|os.O_CREATE, 0o644)
+	f, err := os.OpenFile(outputPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		slog.Error("failed to open file", "path", outputPath, "error", err)
 		os.Exit(1)
