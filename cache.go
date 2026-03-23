@@ -26,6 +26,12 @@ func InitCache() {
 			os.Exit(1)
 		}
 	}
+	if cfg.RefreshDataCache {
+		if err := os.RemoveAll(getDataCachePath()); err != nil {
+			slog.Error("could not remove pages cache", "path", getPagesDir(), "error", err)
+			os.Exit(1)
+		}
+	}
 
 	if err := os.MkdirAll(getPagesDir(), 0o755); err != nil {
 		slog.Error("could not create pages cache dir", "path", getPagesDir(), "error", err)
@@ -44,11 +50,11 @@ func NewCache() Cache {
 }
 
 func (c *Cache) Load() {
-	data, err := os.ReadFile(getCachePath())
+	data, err := os.ReadFile(getDataCachePath())
 	if err == nil {
-		slog.Debug("cache found", "path", getCachePath())
+		slog.Debug("cache found", "path", getDataCachePath())
 	} else if !os.IsNotExist(err) {
-		slog.Error("failed to open file", "path", getCachePath(), "error", err)
+		slog.Error("failed to open file", "path", getDataCachePath(), "error", err)
 		os.Exit(1)
 	} else {
 		return
@@ -77,7 +83,7 @@ func (c Cache) Save() error {
 	}
 	tempFile.Close()
 
-	return os.Rename(tempFile.Name(), getCachePath())
+	return os.Rename(tempFile.Name(), getDataCachePath())
 }
 
 func getPagesDir() string {
@@ -88,6 +94,6 @@ func getAdsDir() string {
 	return path.Join(cfg.CacheDir, saveAdsDir)
 }
 
-func getCachePath() string {
+func getDataCachePath() string {
 	return path.Join(cfg.CacheDir, "cache.json")
 }

@@ -17,6 +17,7 @@ type Config struct {
 	CacheDir          string `mapstructure:"cache-dir"`
 	RefreshCache      bool   `mapstructure:"refresh-cache"`
 	RefreshPagesCache bool   `mapstructure:"refresh-pages-cache"`
+	RefreshDataCache  bool   `mapstructure:"refresh-data-cache"`
 	AiProcessing      bool   `mapstructure:"ai-processing"`
 	Category          string `mapstructure:"category"`
 	Pages             uint   `mapstructure:"pages"`
@@ -32,6 +33,7 @@ func initConfig() {
 	flags.String("cache-dir", "./cache", "path to cache directory")
 	flags.BoolP("refresh-cache", "R", false, "invalidate and rebuild cache")
 	flags.BoolP("refresh-pages-cache", "P", false, "invalidate and rebuild ad browser pages cache")
+	flags.BoolP("refresh-data-cache", "D", false, "invalidate and rebuild ad data cache")
 	flags.BoolP("ai-processing", "a", false, "enable AI processing")
 	flags.StringP("category", "c", "", "category to scrape (example 'elektronika/kompyutery/nastolnye')")
 	flags.UintP("pages", "p", 1, "pages to scan")

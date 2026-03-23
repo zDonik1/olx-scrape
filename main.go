@@ -37,7 +37,7 @@ func main() {
 
 	urls := make(chan string)
 	adUrls := make(chan string)
-	adDatas := make(chan AdData)
+	adDatas := make(chan AdData, 10000)
 	procAdDatas := make(chan AdData)
 
 	cache := NewCache()
