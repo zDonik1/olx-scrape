@@ -102,9 +102,9 @@ func processPages(
 	cancel context.CancelFunc,
 	workers int,
 ) {
-	var wg sync.WaitGroup
-	for range workers {
-		wg.Go(func() {
+	runWithWorkers(
+		workers,
+		func() {
 			for url := range urls {
 				select {
 				case <-ctx.Done():
@@ -113,12 +113,11 @@ func processPages(
 					getAdUrls(out, cancel, url)
 				}
 			}
-		})
-	}
-	go func() {
-		wg.Wait()
-		close(out)
-	}()
+		},
+		func() {
+			close(out)
+		},
+	)
 }
 
 func processAds(
@@ -126,18 +125,17 @@ func processAds(
 	out chan<- AdData,
 	workers int,
 ) {
-	var wg sync.WaitGroup
-	for range workers {
-		wg.Go(func() {
+	runWithWorkers(
+		workers,
+		func() {
 			for url := range urls {
 				getAdData(out, url)
 			}
-		})
-	}
-	go func() {
-		wg.Wait()
-		close(out)
-	}()
+		},
+		func() {
+			close(out)
+		},
+	)
 }
 
 func processAiData(
@@ -157,18 +155,17 @@ func processAiData(
 
 	aiCache := loadAiCache()
 
-	var wg sync.WaitGroup
-	for range workers {
-		wg.Go(func() {
+	runWithWorkers(
+		workers,
+		func() {
 			for adData := range adDatas {
 				getAiProcessedData(out, adData, aiCache)
 			}
-		})
-	}
-	go func() {
-		wg.Wait()
-		close(out)
-	}()
+		},
+		func() {
+			close(out)
+		},
+	)
 }
 
 func writeOutput(datas <-chan ProcessedAdData) {
@@ -468,6 +465,17 @@ func getName(doc *goquery.Document) string {
 
 func getDesc(doc *goquery.Document) string {
 	return strings.TrimSpace(doc.Find(`div[data-cy="ad_description"] div`).Text())
+}
+
+func runWithWorkers(workers int, f func(), cleanup func()) {
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Go(f)
+	}
+	go func() {
+		wg.Wait()
+		cleanup()
+	}()
 }
 
 var russianMonths = map[string]string{
