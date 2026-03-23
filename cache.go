@@ -9,15 +9,14 @@ import (
 )
 
 const (
-	saveHtmlDir  = "cache"
 	savePagesDir = "pages"
 	saveAdsDir   = "ads"
 )
 
 func initCache() {
 	if cfg.RefreshCache {
-		if err := os.RemoveAll(saveHtmlDir); err != nil {
-			slog.Error("could not remove cache", "path", saveHtmlDir, "error", err)
+		if err := os.RemoveAll(cfg.CacheDir); err != nil {
+			slog.Error("could not remove cache", "path", cfg.CacheDir, "error", err)
 			os.Exit(1)
 		}
 	}
@@ -78,13 +77,13 @@ func saveAiCache(cache map[uint]AdData) error {
 }
 
 func getPagesDir() string {
-	return path.Join(saveHtmlDir, savePagesDir)
+	return path.Join(cfg.CacheDir, savePagesDir)
 }
 
 func getAdsDir() string {
-	return path.Join(saveHtmlDir, saveAdsDir)
+	return path.Join(cfg.CacheDir, saveAdsDir)
 }
 
 func getAiCachePath() string {
-	return path.Join(saveHtmlDir, "ai_cache.json")
+	return path.Join(cfg.CacheDir, "ai_cache.json")
 }

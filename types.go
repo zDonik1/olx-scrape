@@ -146,7 +146,8 @@ func (om *OrderedMap[K, V]) UnmarshalJSON(data []byte) error {
 			return fmt.Errorf("%s not key-value pair", keyVal)
 		}
 
-		key, found := bytes.CutPrefix(keyValPair[0], []byte(`"`))
+		key := bytes.TrimSpace(keyValPair[0])
+		key, found := bytes.CutPrefix(key, []byte(`"`))
 		if !found {
 			return errors.New(`'"' not found near key`)
 		}
