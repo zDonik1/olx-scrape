@@ -44,7 +44,9 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	// It is always best to keep this at 1 worker, so that pages are processed sequentially
 	processPages(ctx, urls, adUrls, cancel, 1)
-	processAds(adUrls, adDatas, 1)
+	processAds(adUrls, adDatas, int(cfg.Jobs))
+	// AI processing is done with Ollama and as such always ends up being the bottleneck.
+	// Thus it is best to keep it at 1 worker
 	processAiData(adDatas, procAdDatas, 1)
 
 	go func() {

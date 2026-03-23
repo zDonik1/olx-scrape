@@ -13,6 +13,7 @@ var cfg = Config{}
 
 type Config struct {
 	Verbose           bool   `mapstructure:"verbose"`
+	Jobs              uint   `mapstructure:"jobs"`
 	RefreshCache      bool   `mapstructure:"refresh-cache"`
 	RefreshPagesCache bool   `mapstructure:"refresh-pages-cache"`
 	AiProcessing      bool   `mapstructure:"ai-processing"`
@@ -26,6 +27,7 @@ func initConfig() {
 	flags := pflag.NewFlagSet("config", pflag.ContinueOnError)
 
 	flags.BoolP("verbose", "v", false, "print verbose output")
+	flags.UintP("jobs", "j", 10, "parallel jobs to spawn for fetching ad data")
 	flags.BoolP("refresh-cache", "R", false, "invalidate and rebuild cache")
 	flags.BoolP("refresh-pages-cache", "P", false, "invalidate and rebuild ad browser pages cache")
 	flags.BoolP("ai-processing", "a", false, "enable AI processing")
