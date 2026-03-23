@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	saveHtmlDir  = "saved_html"
+	saveHtmlDir  = "cache"
 	savePagesDir = "pages"
 	saveAdsDir   = "ads"
 )

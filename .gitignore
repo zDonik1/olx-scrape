@@ -2,6 +2,6 @@
 .devenv*
 
 # Output
-saved_html/
+cache/
 output.*
 .~lock*
