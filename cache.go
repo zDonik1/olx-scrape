@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path"
+	"strings"
 )
 
 const (
@@ -87,13 +88,17 @@ func (c Cache) Save() error {
 }
 
 func getPagesDir() string {
-	return path.Join(cfg.CacheDir, savePagesDir)
+	return path.Join(cfg.CacheDir, getNormalizedCategory(), savePagesDir)
 }
 
 func getAdsDir() string {
-	return path.Join(cfg.CacheDir, saveAdsDir)
+	return path.Join(cfg.CacheDir, getNormalizedCategory(), saveAdsDir)
 }
 
 func getDataCachePath() string {
-	return path.Join(cfg.CacheDir, "cache.json")
+	return path.Join(cfg.CacheDir, getNormalizedCategory(), "cache.json")
+}
+
+func getNormalizedCategory() string {
+	return strings.ReplaceAll(cfg.Category, "/", "-")
 }
