@@ -368,6 +368,7 @@ func getAiProcessedData(
 	out chan<- ProcessedAdData, adData AdData, aiCache map[uint]ProcessedAdData,
 ) {
 	if procAdData, exists := aiCache[adData.Id]; exists {
+		procAdData.AdData = adData
 		out <- procAdData
 		return
 	}
