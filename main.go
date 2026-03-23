@@ -7,6 +7,7 @@ Fetch Ad URLs from Pages -> Fetch Ad data -> Process with AI
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,7 +21,6 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/gocarina/gocsv"
 	"github.com/lmittmann/tint"
 	"github.com/ollama/ollama/api"
 )
@@ -38,7 +38,7 @@ func main() {
 	urls := make(chan string)
 	adUrls := make(chan string)
 	adDatas := make(chan AdData)
-	procAdDatas := make(chan ProcessedAdData)
+	procAdDatas := make(chan AdData)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	// It is always best to keep this at 1 worker, so that pages are processed sequentially
@@ -140,13 +140,13 @@ func processAds(
 
 func processAiData(
 	adDatas <-chan AdData,
-	out chan<- ProcessedAdData,
+	out chan<- AdData,
 	workers int,
 ) {
 	if !cfg.AiProcessing {
 		go func() {
 			for adData := range adDatas {
-				out <- ProcessedAdData{AdData: adData}
+				out <- adData
 			}
 			close(out)
 		}()
@@ -168,7 +168,7 @@ func processAiData(
 	)
 }
 
-func writeOutput(datas <-chan ProcessedAdData) {
+func writeOutput(datas <-chan AdData) {
 	outputPath := "output.csv"
 	f, err := os.OpenFile(outputPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
@@ -177,15 +177,19 @@ func writeOutput(datas <-chan ProcessedAdData) {
 	}
 	defer f.Close()
 
-	collector := []ProcessedAdData{}
-	for data := range datas {
-		slog.Debug("saving ad data", "data", data)
-		collector = append(collector, data)
-	}
+	writer := csv.NewWriter(f)
+	defer writer.Flush()
 
-	if err := gocsv.Marshal(collector, f); err != nil {
-		slog.Error("failed to marshal to CSV", "error", err)
-		os.Exit(1)
+	wroteHeader := false
+	for data := range datas {
+		if !wroteHeader {
+			headers := data.CsvHeaders()
+			slog.Debug("writing headers", "headers", headers)
+			writer.Write(headers)
+			wroteHeader = true
+		}
+		slog.Debug("saving ad data", "data", data)
+		writer.Write(data.CsvRow())
 	}
 }
 
@@ -220,24 +224,6 @@ func getAdUrls(out chan<- string, cancel context.CancelFunc, url string) {
 	})
 }
 
-type Condition string
-
-const (
-	ConditionUnknown Condition = "unknown"
-	ConditionNew     Condition = "new"
-	ConditionUsed    Condition = "used"
-)
-
-type AdData struct {
-	Id        uint      `json:"id" csv:"id"`
-	Date      Date      `json:"date" csv:"date"`
-	Price     float32   `json:"price" csv:"price"`
-	Condition Condition `json:"condition" csv:"condition"`
-	Name      string    `json:"name" csv:"name"`
-	Desc      string    `json:"desc" csv:"desc"`
-	Url       string    `json:"url" csv:"url"`
-}
-
 func getAdData(out chan<- AdData, url string) {
 	contentReader, err := fetch(url)
 	if err != nil {
@@ -263,24 +249,10 @@ func getAdData(out chan<- AdData, url string) {
 	}
 }
 
-type ProcessedAdData struct {
-	AdData
-	Cpu         *string  `json:"cpu" csv:"cpu"`
-	Gpu         *string  `json:"gpu" csv:"gpu"`
-	Ram         *string  `json:"ram" csv:"ram"`
-	Storage     []string `json:"storage" csv:"storage"`
-	Motherboard *string  `json:"motherboard" csv:"motherboard"`
-	Cooler      *string  `json:"cpu_cooler" csv:"cpu_cooler"`
-	Case        *string  `json:"case" csv:"case"`
-	Psu         *string  `json:"psu" csv:"psu"`
-	Os          *string  `json:"os" csv:"os"`
-}
-
 func getAiProcessedData(
-	out chan<- ProcessedAdData, adData AdData, aiCache map[uint]ProcessedAdData,
+	out chan<- AdData, adData AdData, aiCache map[uint]AdData,
 ) {
 	if procAdData, exists := aiCache[adData.Id]; exists {
-		procAdData.AdData = adData
 		out <- procAdData
 		return
 	}
@@ -307,16 +279,16 @@ func getAiProcessedData(
 		result = strings.TrimSuffix(result, "```")
 		result = strings.TrimSpace(result)
 
-		processedData := ProcessedAdData{AdData: adData}
-		if err := json.Unmarshal([]byte(result), &processedData); err != nil {
+		adData.StructuredData = OrderedMap[string, any]{}
+		if err := json.Unmarshal([]byte(result), &adData.StructuredData); err != nil {
 			return fmt.Errorf("failed to unmarshal to json: %w\n%s", err, resp.Message.Content)
 		}
 
-		aiCache[processedData.Id] = processedData
+		aiCache[adData.Id] = adData
 		if err := saveAiCache(aiCache); err != nil {
 			return fmt.Errorf("failed to save AI cache: %w", err)
 		}
-		out <- processedData
+		out <- adData
 		return nil
 	})
 	if err != nil {

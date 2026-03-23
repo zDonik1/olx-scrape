@@ -38,8 +38,8 @@ func initCache() {
 	}
 }
 
-func loadAiCache() map[uint]ProcessedAdData {
-	aiCache := map[uint]ProcessedAdData{}
+func loadAiCache() map[uint]AdData {
+	aiCache := map[uint]AdData{}
 	data, err := os.ReadFile(getAiCachePath())
 	if err == nil {
 		slog.Info("using AI cache")
@@ -57,7 +57,7 @@ func loadAiCache() map[uint]ProcessedAdData {
 	return aiCache
 }
 
-func saveAiCache(cache map[uint]ProcessedAdData) error {
+func saveAiCache(cache map[uint]AdData) error {
 	data, err := json.Marshal(cache)
 	if err != nil {
 		return fmt.Errorf("failed to marshal to json: %w\n%v", err, cache)
