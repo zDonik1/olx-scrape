@@ -8,7 +8,6 @@ Fetch Ad URLs from Pages -> Fetch Ad data -> Process with AI
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -22,19 +21,10 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/ollama/ollama/api"
-	"github.com/spf13/pflag"
-	"github.com/spf13/viper"
 	"github.com/xuri/excelize/v2"
 )
 
-const (
-	saveHtmlDir  = "saved_html"
-	savePagesDir = "pages"
-	saveAdsDir   = "ads"
-)
-
 var (
-	cfg            = Config{}
 	client         = http.Client{}
 	adCounter uint = 0 // sync this under a mutex
 )
@@ -78,71 +68,6 @@ func main() {
 Summary:
     Ads processed: %d`,
 		adCounter)
-}
-
-type Config struct {
-	Verbose           bool   `mapstructure:"verbose"`
-	RefreshCache      bool   `mapstructure:"refresh-cache"`
-	RefreshPagesCache bool   `mapstructure:"refresh-pages-cache"`
-	AiProcessing      bool   `mapstructure:"ai-processing"`
-	Category          string `mapstructure:"category"`
-	Pages             uint   `mapstructure:"pages"`
-	MaxAds            uint   `mapstructure:"max-ads"`
-}
-
-func initConfig() {
-	viper := viper.New()
-	flags := pflag.NewFlagSet("config", pflag.ContinueOnError)
-
-	flags.BoolP("verbose", "v", false, "print verbose output")
-	flags.BoolP("refresh-cache", "R", false, "invalidate and rebuild cache")
-	flags.BoolP("refresh-pages-cache", "P", false, "invalidate and rebuild ad browser pages cache")
-	flags.BoolP("ai-processing", "a", false, "enable AI processing")
-	flags.StringP("category", "c", "", "category to scrape (example 'elektronika/kompyutery/nastolnye')")
-	flags.UintP("pages", "p", 1, "pages to scan")
-	flags.Uint("max-ads", 0, "maximum number of ads to process, 0 means no max")
-
-	if err := viper.BindPFlags(flags); err != nil {
-		slog.Error("failed to bind flags", "error", err)
-		os.Exit(1)
-	}
-
-	if err := flags.Parse(os.Args[1:]); err != nil {
-		if errors.Is(err, pflag.ErrHelp) {
-			os.Exit(0)
-		}
-		slog.Error("failed to parse flags", "error", err)
-		os.Exit(1)
-	}
-
-	if err := viper.Unmarshal(&cfg); err != nil {
-		slog.Error("error unmarshaling config", "error", err)
-		os.Exit(1)
-	}
-}
-
-func initCache() {
-	if cfg.RefreshCache {
-		if err := os.RemoveAll(saveHtmlDir); err != nil {
-			slog.Error("could not remove cache", "path", saveHtmlDir, "error", err)
-			os.Exit(1)
-		}
-	}
-	if cfg.RefreshPagesCache {
-		if err := os.RemoveAll(getPagesDir()); err != nil {
-			slog.Error("could not remove pages cache", "path", getPagesDir(), "error", err)
-			os.Exit(1)
-		}
-	}
-
-	if err := os.MkdirAll(getPagesDir(), 0o755); err != nil {
-		slog.Error("could not create pages cache dir", "path", getPagesDir(), "error", err)
-		os.Exit(1)
-	}
-	if err := os.MkdirAll(getAdsDir(), 0o755); err != nil {
-		slog.Error("could not create ads cache dir", "path", getPagesDir(), "error", err)
-		os.Exit(1)
-	}
 }
 
 func processPages(
@@ -605,45 +530,6 @@ func getDesc(doc *goquery.Document) string {
 	return strings.TrimSpace(doc.Find(`div[data-cy="ad_description"] div`).Text())
 }
 
-func loadAiCache() map[uint]ProcessedAdData {
-	aiCache := map[uint]ProcessedAdData{}
-	data, err := os.ReadFile(getAiCachePath())
-	if err == nil {
-		slog.Info("using AI cache")
-	} else if !os.IsNotExist(err) {
-		slog.Error("failed to open file", "path", getAiCachePath(), "error", err)
-		os.Exit(1)
-	} else {
-		return aiCache
-	}
-
-	if err := json.Unmarshal(data, &aiCache); err != nil {
-		slog.Error("failed to unmarshal AI cache into json", "error", err)
-		os.Exit(1)
-	}
-	return aiCache
-}
-
-func saveAiCache(cache map[uint]ProcessedAdData) error {
-	data, err := json.Marshal(cache)
-	if err != nil {
-		return fmt.Errorf("failed to marshal to json: %w\n%v", err, cache)
-	}
-
-	tempFile, err := os.CreateTemp("", "ai_cache_*.json")
-	if err != nil {
-		return fmt.Errorf("failed to create temp file: %w", err)
-	}
-
-	if _, err := tempFile.Write(data); err != nil {
-		tempFile.Close()
-		return fmt.Errorf("failed to write to backup: %w", err)
-	}
-	tempFile.Close()
-
-	return os.Rename(tempFile.Name(), getAiCachePath())
-}
-
 var russianMonths = map[string]string{
 	"января":   "January",
 	"февраля":  "February",
@@ -664,18 +550,6 @@ func parseRussianDate(s string) (time.Time, error) {
 		s = strings.TrimSuffix(strings.ReplaceAll(s, ru, en), " г.")
 	}
 	return time.Parse("2 January 2006", s)
-}
-
-func getPagesDir() string {
-	return path.Join(saveHtmlDir, savePagesDir)
-}
-
-func getAdsDir() string {
-	return path.Join(saveHtmlDir, saveAdsDir)
-}
-
-func getAiCachePath() string {
-	return path.Join(saveHtmlDir, "ai_cache.json")
 }
 
 func ptr[T any](val T) *T {
