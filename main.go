@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/lmittmann/tint"
 	"github.com/ollama/ollama/api"
 	"github.com/xuri/excelize/v2"
 )
@@ -31,9 +32,7 @@ var (
 
 func main() {
 	initConfig()
-	if cfg.Verbose {
-		slog.SetLogLoggerLevel(slog.LevelDebug)
-	}
+	initLogger()
 	initCache()
 
 	urls := make(chan string)
@@ -70,6 +69,30 @@ func main() {
 Summary:
     Ads processed: %d`,
 		adCounter)
+}
+
+func initLogger() {
+	level := slog.LevelInfo
+	if cfg.Verbose {
+		level = slog.LevelDebug
+	}
+	slog.SetDefault(slog.New(
+		tint.NewHandler(os.Stderr, &tint.Options{
+			Level:      level,
+			AddSource:  true,
+			TimeFormat: time.DateTime,
+			ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+				if a.Value.Kind() == slog.KindAny {
+					if _, ok := a.Value.Any().(error); ok {
+						return tint.Attr(9, a)
+					}
+				} else if a.Key == slog.MessageKey {
+					return tint.Attr(4, a)
+				}
+				return a
+			},
+		}),
+	))
 }
 
 func processPages(
