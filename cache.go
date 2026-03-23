@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 )
 
 const (
@@ -44,13 +45,29 @@ func InitCache() {
 	}
 }
 
-type Cache map[string]AdData
-
-func NewCache() Cache {
-	return map[string]AdData{}
+type Cache struct {
+	m  map[string]AdData
+	mu sync.RWMutex
 }
 
-func (c *Cache) Load() {
+func NewCache() *Cache {
+	return &Cache{m: map[string]AdData{}, mu: sync.RWMutex{}}
+}
+
+func (c *Cache) Load(k string) (AdData, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	data, exists := c.m[k]
+	return data, exists
+}
+
+func (c *Cache) Store(k string, v AdData) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.m[k] = v
+}
+
+func (c *Cache) LoadFromFile() {
 	data, err := os.ReadFile(getDataCachePath())
 	if err == nil {
 		slog.Debug("cache found", "path", getDataCachePath())
@@ -61,16 +78,20 @@ func (c *Cache) Load() {
 		return
 	}
 
-	if err := json.Unmarshal(data, c); err != nil {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := json.Unmarshal(data, &c.m); err != nil {
 		slog.Error("failed to unmarshal cache into json", "error", err)
 		os.Exit(1)
 	}
 }
 
-func (c Cache) Save() error {
-	data, err := json.Marshal(c)
+func (c *Cache) SaveToFile() error {
+	c.mu.RLock()
+	data, err := json.Marshal(c.m)
+	c.mu.RUnlock()
 	if err != nil {
-		return fmt.Errorf("failed to marshal to json: %w\n%v", err, map[string]AdData(c))
+		return fmt.Errorf("failed to marshal to json: %w", err)
 	}
 
 	tempFile, err := os.CreateTemp("", "cache_*.json")

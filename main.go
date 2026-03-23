@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -26,8 +27,8 @@ import (
 )
 
 var (
-	client         = http.Client{}
-	adCounter uint = 0 // sync this under a mutex
+	client                  = http.Client{}
+	adCounter atomic.Uint32 = atomic.Uint32{}
 )
 
 func main() {
@@ -41,7 +42,7 @@ func main() {
 	procAdDatas := make(chan AdData)
 
 	cache := NewCache()
-	cache.Load()
+	cache.LoadFromFile()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	// It is always best to keep this at 1 worker, so that pages are processed sequentially
@@ -71,7 +72,7 @@ func main() {
 	fmt.Printf(`
 Summary:
     Ads processed: %d`,
-		adCounter)
+		adCounter.Load()-1)
 }
 
 func initLogger() {
@@ -123,7 +124,7 @@ func processPages(
 	)
 }
 
-func processAds(urls <-chan string, out chan<- AdData, cache Cache, workers int) {
+func processAds(urls <-chan string, out chan<- AdData, cache *Cache, workers int) {
 	runWithWorkers(
 		workers,
 		func() {
@@ -137,7 +138,7 @@ func processAds(urls <-chan string, out chan<- AdData, cache Cache, workers int)
 	)
 }
 
-func processAiData(adDatas <-chan AdData, out chan<- AdData, cache Cache, workers int) {
+func processAiData(adDatas <-chan AdData, out chan<- AdData, cache *Cache, workers int) {
 	if !cfg.AiProcessing {
 		go func() {
 			for adData := range adDatas {
@@ -201,10 +202,11 @@ func getAdUrls(out chan<- string, cancel context.CancelFunc, url string) {
 	}
 
 	doc.Find(`div[data-cy="l-card"]`).EachWithBreak(func(i int, s *goquery.Selection) bool {
-		if cfg.MaxAds != 0 && adCounter >= cfg.MaxAds {
+		if cfg.MaxAds != 0 && uint(adCounter.Load()) >= cfg.MaxAds {
 			cancel()
 			return false
 		}
+		adCounter.Add(1)
 
 		adRef, exists := s.Find("a").Attr("href")
 		if !exists {
@@ -212,13 +214,12 @@ func getAdUrls(out chan<- string, cancel context.CancelFunc, url string) {
 			return true
 		}
 		out <- "https://www.olx.uz" + adRef
-		adCounter++
 		return true
 	})
 }
 
-func getAdData(out chan<- AdData, url string, cache Cache) {
-	if adData, exists := cache[url]; exists {
+func getAdData(out chan<- AdData, url string, cache *Cache) {
+	if adData, exists := cache.Load(url); exists {
 		adData.StructuredData = nil
 		out <- adData
 		return
@@ -247,8 +248,8 @@ func getAdData(out chan<- AdData, url string, cache Cache) {
 		Url:       url,
 	}
 
-	cache[url] = adData
-	if err := cache.Save(); err != nil {
+	cache.Store(url, adData)
+	if err := cache.SaveToFile(); err != nil {
 		slog.Error("failed to save cache", "error", err)
 		return
 	}
@@ -256,8 +257,8 @@ func getAdData(out chan<- AdData, url string, cache Cache) {
 	out <- adData
 }
 
-func getAiProcessedData(out chan<- AdData, adData AdData, cache Cache) {
-	if adData, exists := cache[adData.Url]; exists && adData.StructuredData != nil {
+func getAiProcessedData(out chan<- AdData, adData AdData, cache *Cache) {
+	if adData, exists := cache.Load(adData.Url); exists && adData.StructuredData != nil {
 		out <- adData
 		return
 	}
@@ -289,8 +290,8 @@ func getAiProcessedData(out chan<- AdData, adData AdData, cache Cache) {
 			return fmt.Errorf("failed to unmarshal to json: %w\n%s", err, resp.Message.Content)
 		}
 
-		cache[adData.Url] = adData
-		if err := cache.Save(); err != nil {
+		cache.Store(adData.Url, adData)
+		if err := cache.SaveToFile(); err != nil {
 			return fmt.Errorf("failed to save cache: %w", err)
 		}
 		return nil
