@@ -300,6 +300,7 @@ func getAiProcessedData(out chan<- AdData, adData AdData, cache *Cache) {
 		slog.Error("failed to get ollama response", "error", err)
 		return
 	}
+	slog.Info("processed with AI", "url", adData.Url)
 	out <- adData
 }
 
