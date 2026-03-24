@@ -285,7 +285,7 @@ func getAiProcessedData(out chan<- AdData, adData AdData, cache *Cache) {
 		result = strings.TrimSuffix(result, "```")
 		result = strings.TrimSpace(result)
 
-		adData.StructuredData = NewOrderedMap[string, any]()
+		adData.StructuredData = NewOrderedStringMap()
 		if err := json.Unmarshal([]byte(result), adData.StructuredData); err != nil {
 			return fmt.Errorf("failed to unmarshal to json: %w\n%s", err, resp.Message.Content)
 		}

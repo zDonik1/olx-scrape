@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
 	"slices"
 	"strings"
@@ -20,14 +21,14 @@ const (
 )
 
 type AdData struct {
-	Id             uint                     `json:"id"`
-	Date           Date                     `json:"date"`
-	Price          float32                  `json:"price"`
-	Condition      Condition                `json:"condition"`
-	Name           string                   `json:"name"`
-	Desc           string                   `json:"desc"`
-	Url            string                   `json:"url"`
-	StructuredData *OrderedMap[string, any] `json:"data"`
+	Id             uint              `json:"id"`
+	Date           Date              `json:"date"`
+	Price          float32           `json:"price"`
+	Condition      Condition         `json:"condition"`
+	Name           string            `json:"name"`
+	Desc           string            `json:"desc"`
+	Url            string            `json:"url"`
+	StructuredData *OrderedStringMap `json:"data"`
 }
 
 func (ad AdData) CsvHeaders() []string {
@@ -79,10 +80,11 @@ type OrderedMap[K comparable, V any] struct {
 }
 
 func NewOrderedMap[K comparable, V any]() *OrderedMap[K, V] {
-	return &OrderedMap[K, V]{
-		m:     make(map[K]V),
-		order: make([]K, 0),
-	}
+	return NewOrderedMapWithData(make(map[K]V), make([]K, 0))
+}
+
+func NewOrderedMapWithData[K comparable, V any](m map[K]V, order []K) *OrderedMap[K, V] {
+	return &OrderedMap[K, V]{m: m, order: order}
 }
 
 func (om OrderedMap[K, V]) Len() int {
@@ -118,60 +120,115 @@ func (om OrderedMap[K, V]) All() iter.Seq2[K, V] {
 	}
 }
 
-func (om OrderedMap[K, V]) MarshalJSON() ([]byte, error) {
+type OrderedStringMap struct {
+	OrderedMap[string, any]
+}
+
+func NewOrderedStringMap() *OrderedStringMap {
+	return &OrderedStringMap{
+		OrderedMap: *NewOrderedMap[string, any](),
+	}
+}
+
+func NewOrderedStringMapWithData(m map[string]any, order []string) *OrderedStringMap {
+	return &OrderedStringMap{OrderedMap: *NewOrderedMapWithData(m, order)}
+}
+
+func (om OrderedStringMap) MarshalJSON() ([]byte, error) {
 	result := make([]string, 0, len(om.Keys()))
 	for k, v := range om.All() {
 		m, err := json.Marshal(v)
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, fmt.Sprintf(`"%s":%s`, stringify(k), m))
+		result = append(result, fmt.Sprintf(`"%s":%s`, k, m))
 	}
 	return fmt.Appendf(nil, "{%s}", strings.Join(result, ",")), nil
 }
 
-func (om *OrderedMap[K, V]) UnmarshalJSON(data []byte) error {
-	data = bytes.TrimSpace(data)
-	data, found := bytes.CutPrefix(data, []byte("{"))
-	if !found {
-		return errors.New("'{' not found")
-	}
-	data, found = bytes.CutSuffix(data, []byte("}"))
-	if !found {
-		return errors.New("'}' not found")
+func (om *OrderedStringMap) UnmarshalJSON(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if !dec.More() {
+		return errors.New("input data empty")
 	}
 
-	om.m = make(map[K]V)
-	om.order = make([]K, 0)
+	if om.m == nil {
+		om.m = make(map[string]any)
+	}
+	if om.order == nil {
+		om.order = make([]string, 0)
+	}
 
-	keyVals := bytes.SplitSeq(data, []byte(","))
-	for keyVal := range keyVals {
-		keyValPair := bytes.Split(keyVal, []byte(":"))
-		if len(keyValPair) != 2 {
-			return fmt.Errorf("%s not key-value pair", keyVal)
-		}
+	t, err := dec.Token()
+	if err != nil {
+		return err
+	}
 
-		key := bytes.TrimSpace(keyValPair[0])
-		key, found := bytes.CutPrefix(key, []byte(`"`))
-		if !found {
-			return errors.New(`'"' not found near key`)
-		}
-		key, found = bytes.CutSuffix(key, []byte(`"`))
-		if !found {
-			return errors.New(`'"' not found near key`)
-		}
+	delim, ok := t.(json.Delim)
+	if !ok {
+		return fmt.Errorf("first token '%s' not delimeter", t)
+	}
+	if delim != '{' {
+		return fmt.Errorf("first token '%s' not '{'", t)
+	}
 
-		k, ok := any(string(key)).(K)
-		if !ok {
-			return fmt.Errorf("key type K is not of type string")
-		}
-
-		var v V
-		if err := json.Unmarshal(keyValPair[1], &v); err != nil {
+	for dec.More() {
+		t, err := dec.Token()
+		if err != nil {
 			return err
 		}
 
-		om.Set(k, v)
+		key, ok := t.(string)
+		if !ok {
+			return fmt.Errorf("key not found in %v", t)
+		}
+
+		reader := dec.Buffered()
+		c, err := findNonWhiteSpace(reader)
+		if err != nil {
+			return err
+		}
+		if c != ':' {
+			return fmt.Errorf("expected ':', got '%b'", c)
+		}
+
+		c, err = findNonWhiteSpace(reader)
+		if err != nil {
+			return err
+		}
+
+		var result any
+		if c == '{' {
+			newOm := NewOrderedStringMap()
+			dec.Decode(newOm)
+			result = newOm
+		} else {
+			if err := dec.Decode(&result); err != nil {
+				return err
+			}
+		}
+		om.Set(key, result)
 	}
 	return nil
+}
+
+// ---- from Decoder source code (modified) ----
+
+func findNonWhiteSpace(reader io.Reader) (byte, error) {
+	c := make([]byte, 1)
+	for {
+		_, err := reader.Read(c)
+		if err != nil {
+			return 0, err
+		}
+
+		if isSpace(c[0]) {
+			continue
+		}
+		return c[0], nil
+	}
+}
+
+func isSpace(c byte) bool {
+	return c <= ' ' && (c == ' ' || c == '\t' || c == '\r' || c == '\n')
 }
