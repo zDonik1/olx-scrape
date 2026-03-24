@@ -410,6 +410,8 @@ func getPrice(doc *goquery.Document) float32 {
 			return 0
 		}
 		return float32(price) / exchangeRate
+	} else if text == "обмен" {
+		return 0
 	}
 	slog.Error("unknown price format", "str", text)
 	return 0
