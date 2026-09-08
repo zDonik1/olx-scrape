@@ -420,7 +420,7 @@ func getPrice(doc *goquery.Document) float32 {
 
 func getCondition(doc *goquery.Document) Condition {
 	var condition Condition
-	doc.Find(`p[class="css-odhutu"]`).EachWithBreak(
+	doc.Find(`p`).EachWithBreak(
 		func(i int, s *goquery.Selection) bool {
 			text := s.Text()
 			if strings.HasPrefix(text, "Состояние:") {
