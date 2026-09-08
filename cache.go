@@ -94,7 +94,13 @@ func (c *Cache) SaveToFile() error {
 		return fmt.Errorf("failed to marshal to json: %w", err)
 	}
 
-	tempFile, err := os.CreateTemp("", "cache_*.json")
+	cachePath := getDataCachePath()
+	if err := os.MkdirAll(path.Dir(cachePath), 0o755); err != nil {
+		return fmt.Errorf("failed to create cache dir: %w", err)
+	}
+	// The temp file MUST be on the same filesystem as the target so the
+	// rename below doesn't fail with "invalid cross-device link".
+	tempFile, err := os.CreateTemp(path.Dir(cachePath), "cache_*.json")
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
@@ -105,7 +111,7 @@ func (c *Cache) SaveToFile() error {
 	}
 	tempFile.Close()
 
-	return os.Rename(tempFile.Name(), getDataCachePath())
+	return os.Rename(tempFile.Name(), cachePath)
 }
 
 func getPagesDir() string {
