@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"iter"
 	"slices"
 	"strings"
@@ -147,16 +146,16 @@ func (om OrderedStringMap) MarshalJSON() ([]byte, error) {
 }
 
 func (om *OrderedStringMap) UnmarshalJSON(data []byte) error {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	if !dec.More() {
-		return errors.New("input data empty")
-	}
-
 	if om.m == nil {
 		om.m = make(map[string]any)
 	}
 	if om.order == nil {
 		om.order = make([]string, 0)
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if !dec.More() {
+		return errors.New("input data empty")
 	}
 
 	t, err := dec.Token()
@@ -169,9 +168,15 @@ func (om *OrderedStringMap) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("first token '%s' not delimeter", t)
 	}
 	if delim != '{' {
-		return fmt.Errorf("first token '%s' not '{'", t)
+		return fmt.Errorf("first token '%s' not '{'", delim)
 	}
 
+	return om.parseObject(dec)
+}
+
+// parseObject consumes the rest of an object (up to and including the closing
+// '}') from the decoder. The opening '{' must already have been consumed.
+func (om *OrderedStringMap) parseObject(dec *json.Decoder) error {
 	for dec.More() {
 		t, err := dec.Token()
 		if err != nil {
@@ -183,52 +188,53 @@ func (om *OrderedStringMap) UnmarshalJSON(data []byte) error {
 			return fmt.Errorf("key not found in %v", t)
 		}
 
-		reader := dec.Buffered()
-		c, err := findNonWhiteSpace(reader)
+		value, err := parseJsonValue(dec)
 		if err != nil {
 			return err
 		}
-		if c != ':' {
-			return fmt.Errorf("expected ':', got '%b'", c)
-		}
+		om.Set(key, value)
+	}
 
-		c, err = findNonWhiteSpace(reader)
-		if err != nil {
-			return err
-		}
-
-		var result any
-		if c == '{' {
-			newOm := NewOrderedStringMap()
-			dec.Decode(newOm)
-			result = newOm
-		} else {
-			if err := dec.Decode(&result); err != nil {
-				return err
-			}
-		}
-		om.Set(key, result)
+	if _, err := dec.Token(); err != nil { // closing '}'
+		return err
 	}
 	return nil
 }
 
-// ---- from Decoder source code (modified) ----
-
-func findNonWhiteSpace(reader io.Reader) (byte, error) {
-	c := make([]byte, 1)
-	for {
-		_, err := reader.Read(c)
-		if err != nil {
-			return 0, err
-		}
-
-		if isSpace(c[0]) {
-			continue
-		}
-		return c[0], nil
+// parseJsonValue consumes the next JSON value (object, array or scalar) from
+// the decoder, preserving key order in nested objects.
+func parseJsonValue(dec *json.Decoder) (any, error) {
+	t, err := dec.Token()
+	if err != nil {
+		return nil, err
 	}
-}
 
-func isSpace(c byte) bool {
-	return c <= ' ' && (c == ' ' || c == '\t' || c == '\r' || c == '\n')
+	delim, ok := t.(json.Delim)
+	if !ok {
+		return t, nil // string, number, bool or null
+	}
+
+	switch delim {
+	case '{':
+		nested := NewOrderedStringMap()
+		if err := nested.parseObject(dec); err != nil {
+			return nil, err
+		}
+		return nested, nil
+	case '[':
+		result := []any{}
+		for dec.More() {
+			elem, err := parseJsonValue(dec)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, elem)
+		}
+		if _, err := dec.Token(); err != nil { // closing ']'
+			return nil, err
+		}
+		return result, nil
+	default: // '}' or ']'
+		return nil, fmt.Errorf("unexpected delimiter '%c'", delim)
+	}
 }
